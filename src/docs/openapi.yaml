@@ -1,0 +1,1099 @@
+openapi: 3.0.3
+info:
+  title: SLSEA Real-Time Solar Generation Data API
+  version: 1.0.0
+  description: |
+    REST API for the Sri Lanka Sustainable Energy Authority. Metering devices **write**
+    generation readings for their own installation; SLSEA users **read** data scoped by
+    jurisdiction (national, province, district).
+
+    **How to try it:**
+    1. Call `POST /tokens` with an analyst/admin email and password, or a device `meterId` and `deviceSecret`.
+    2. Copy `access_token` from the response.
+    3. Click **Authorize** (top right) and paste the token.
+
+    **Scopes** (carried inside the JWT):
+    - `installation:write`: devices; may POST readings for their own installation only.
+    - `analyst:read`: SLSEA users; read access within their jurisdiction.
+    - `admin:write`: administrators; create, update and delete installations, and delete readings.
+
+    **Conventions:** JSON only. Timestamps are ISO 8601 UTC. Every error uses one schema
+    (`code`, `message`, `details`). Retrievable resources return `ETag` and `Last-Modified`
+    and answer `If-None-Match` / `If-Modified-Since` with `304` and an empty body.
+    Richardson Maturity Level 2.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Authentication
+  - name: Hierarchy
+    description: Provinces, districts and grid substations (read-only)
+  - name: Installations
+  - name: Readings
+    description: Append-only generation time series
+  - name: Summary
+    description: Derived (processing) resources
+
+paths:
+  /tokens:
+    post:
+      tags: [Authentication]
+      summary: Obtain a JWT access token
+      description: |
+        Send **either** `meterId` + `deviceSecret` (a metering device) **or** `email` + `password`
+        (an SLSEA user). Returns `200`, not `201`, because no retrievable resource is created.
+        Failed attempts are rate limited.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+            examples:
+              user:
+                summary: SLSEA user
+                value: { email: colombo.district@slsea.lk, password: your-password }
+              device:
+                summary: Metering device
+                value: { meterId: SLSEA-M-00001, deviceSecret: your-device-secret }
+      responses:
+        '200':
+          description: Token issued
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /provinces:
+    get:
+      tags: [Hierarchy]
+      summary: List provinces in your jurisdiction
+      description: 'Requires scope `analyst:read`. A district user receives an empty list.'
+      responses:
+        '200':
+          description: Provinces
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvinceCollection'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /provinces/{provinceId}:
+    parameters:
+      - $ref: '#/components/parameters/ProvinceId'
+    get:
+      tags: [Hierarchy]
+      summary: Get one province
+      description: 'Requires scope `analyst:read` and a jurisdiction that includes the province.'
+      responses:
+        '200':
+          description: The province
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Province'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /provinces/{provinceId}/districts:
+    parameters:
+      - $ref: '#/components/parameters/ProvinceId'
+    get:
+      tags: [Hierarchy]
+      summary: List the districts of a province
+      description: 'Requires `analyst:read` and jurisdiction over the province.'
+      responses:
+        '200':
+          description: Districts
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DistrictCollection'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /provinces/{provinceId}/readings:
+    parameters:
+      - $ref: '#/components/parameters/ProvinceId'
+    get:
+      tags: [Readings]
+      summary: Generation history for a whole province
+      description: |
+        Requires `analyst:read` and jurisdiction over the province. Unknown query parameters return `400`.
+        Both time bounds are inclusive; `from` later than `to` returns `400`.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Sort'
+        - { $ref: '#/components/parameters/FilterDistrict' }
+        - { $ref: '#/components/parameters/FilterSubstation' }
+        - { $ref: '#/components/parameters/FilterInstallation' }
+      responses:
+        '200': { $ref: '#/components/responses/ReadingsPage' }
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /districts/{districtId}:
+    parameters:
+      - $ref: '#/components/parameters/DistrictId'
+    get:
+      tags: [Hierarchy]
+      summary: Get one district
+      description: 'Requires `analyst:read` and jurisdiction over the district.'
+      responses:
+        '200':
+          description: The district
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/District'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /districts/{districtId}/substations:
+    parameters:
+      - $ref: '#/components/parameters/DistrictId'
+    get:
+      tags: [Hierarchy]
+      summary: List the grid substations of a district
+      description: 'Requires `analyst:read` and jurisdiction over the district.'
+      responses:
+        '200':
+          description: Substations
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubstationCollection'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /districts/{districtId}/readings:
+    parameters:
+      - $ref: '#/components/parameters/DistrictId'
+    get:
+      tags: [Readings]
+      summary: Generation history for a whole district
+      description: 'Requires `analyst:read` and jurisdiction over the district.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Sort'
+        - { $ref: '#/components/parameters/FilterSubstation' }
+        - { $ref: '#/components/parameters/FilterInstallation' }
+      responses:
+        '200': { $ref: '#/components/responses/ReadingsPage' }
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /districts/{districtId}/generation-summary:
+    parameters:
+      - $ref: '#/components/parameters/DistrictId'
+    get:
+      tags: [Summary]
+      summary: Aggregate generation for a district (processing resource)
+      description: |
+        Requires `analyst:read` and jurisdiction over the district. Computed on request:
+        `currentPowerKw` is the sum of each installation's latest reading; `todayEnergyKwh` is,
+        per installation, the difference between the highest and lowest cumulative `energyKwh`
+        within the current Sri Lanka calendar day (Asia/Colombo, UTC+5:30), summed.
+        "Today" is anchored to the newest reading in the district.
+      responses:
+        '200':
+          description: The summary
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationSummary'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /substations/{substationId}:
+    parameters:
+      - $ref: '#/components/parameters/SubstationId'
+    get:
+      tags: [Hierarchy]
+      summary: Get one grid substation
+      description: 'Requires `analyst:read` and jurisdiction over the substation.'
+      responses:
+        '200':
+          description: The substation
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Substation'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /substations/{substationId}/installations:
+    parameters:
+      - $ref: '#/components/parameters/SubstationId'
+    get:
+      tags: [Installations]
+      summary: List the installations connected to a substation
+      description: 'Requires `analyst:read` and jurisdiction over the substation.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/FilterStatus'
+      responses:
+        '200': { $ref: '#/components/responses/InstallationsPage' }
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /substations/{substationId}/readings:
+    parameters:
+      - $ref: '#/components/parameters/SubstationId'
+    get:
+      tags: [Readings]
+      summary: Generation history for a substation
+      description: 'Requires `analyst:read` and jurisdiction over the substation.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Sort'
+        - { $ref: '#/components/parameters/FilterInstallation' }
+      responses:
+        '200': { $ref: '#/components/responses/ReadingsPage' }
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /installations:
+    get:
+      tags: [Installations]
+      summary: List installations in your jurisdiction
+      description: |
+        Requires `analyst:read`. Results are always limited to the caller's jurisdiction;
+        filters can narrow but never widen it. Unknown query parameters return `400`.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: province
+          in: query
+          schema: { $ref: '#/components/schemas/ObjectId' }
+        - { $ref: '#/components/parameters/FilterDistrict' }
+        - name: substation
+          in: query
+          schema: { $ref: '#/components/schemas/ObjectId' }
+        - name: meterId
+          in: query
+          description: Exact meter identifier
+          schema: { type: string, maxLength: 40 }
+        - $ref: '#/components/parameters/FilterStatus'
+      responses:
+        '200': { $ref: '#/components/responses/InstallationsPage' }
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+    post:
+      tags: [Installations]
+      summary: Register a new installation
+      description: |
+        Requires scope `admin:write` and jurisdiction over the target substation.
+        The device secret is generated by the server, returned **once** in this response,
+        and only its bcrypt hash is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallationCreate'
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              description: URI of the new installation
+              schema: { type: string, format: uri }
+            ETag:
+              schema: { type: string }
+            Last-Modified:
+              schema: { type: string }
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallationCreated'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+
+  /installations/{installationId}:
+    parameters:
+      - $ref: '#/components/parameters/InstallationId'
+    get:
+      tags: [Installations]
+      summary: Get one installation
+      description: 'Requires `analyst:read` and jurisdiction over the installation.'
+      responses:
+        '200':
+          description: The installation
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Installation'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+    put:
+      tags: [Installations]
+      summary: Replace an installation (full representation)
+      description: |
+        Requires `admin:write`. Every writable field is required; this is **not** a partial update
+        (use PATCH). `substationId` is immutable and is rejected if sent.
+        Optional `If-Match` returns `412` if the ETag is stale.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallationReplace'
+      responses:
+        '200':
+          description: Replaced
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Installation'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+    patch:
+      tags: [Installations]
+      summary: Partially update an installation
+      description: |
+        Requires `admin:write`. Send any non-empty subset of the writable fields.
+        A `location` object is merged field by field. To retire an installation while keeping
+        its history, send `{"status": "inactive"}`.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallationPatch'
+            example: { status: maintenance }
+      responses:
+        '200':
+          description: Updated
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Installation'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+    delete:
+      tags: [Installations]
+      summary: Delete an installation
+      description: |
+        Requires `admin:write`. Idempotent. An installation that has readings cannot be deleted
+        (`409`); retire it with PATCH instead so the history survives.
+      responses:
+        '204':
+          description: Deleted (empty body)
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /installations/{installationId}/detail:
+    parameters:
+      - $ref: '#/components/parameters/InstallationId'
+    get:
+      tags: [Installations]
+      summary: Installation composite (with substation, district, province and last reading)
+      description: |
+        Requires `analyst:read` and jurisdiction over the installation. `province` is `null`
+        for district-level users because the province itself is outside their scope.
+      responses:
+        '200':
+          description: The composite
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallationDetail'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /installations/{installationId}/last-reading:
+    parameters:
+      - $ref: '#/components/parameters/InstallationId'
+    get:
+      tags: [Readings]
+      summary: Last known reading (operational view)
+      description: |
+        Requires `analyst:read` and jurisdiction over the installation. A derived resource:
+        the newest reading in the time series, computed on request.
+        `404` if the installation has no readings yet.
+      responses:
+        '200':
+          description: The most recent reading
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reading'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+
+  /installations/{installationId}/readings:
+    parameters:
+      - $ref: '#/components/parameters/InstallationId'
+    get:
+      tags: [Readings]
+      summary: Generation history of one installation (analytical view)
+      description: |
+        Requires `analyst:read` and jurisdiction over the installation. Paginated, filterable by
+        time window, sortable by timestamp (default newest first).
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200': { $ref: '#/components/responses/ReadingsPage' }
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+    post:
+      tags: [Readings]
+      summary: Ingest a new reading (device only)
+      description: |
+        Requires scope `installation:write`, and the token must belong to **this** installation.
+        Not idempotent: a second reading for the same installation and timestamp returns `409`,
+        so a device may safely retry. The timestamp may be at most 5 minutes in the future.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReadingInput'
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              description: URI of the new reading
+              schema: { type: string, format: uri }
+            ETag:
+              schema: { type: string }
+            Last-Modified:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reading'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+
+  /installations/{installationId}/readings/{readingId}:
+    parameters:
+      - $ref: '#/components/parameters/InstallationId'
+      - $ref: '#/components/parameters/ReadingId'
+    get:
+      tags: [Readings]
+      summary: Get one reading
+      description: |
+        Requires `analyst:read` and jurisdiction over the installation. A reading is only
+        retrievable under the installation it belongs to.
+      responses:
+        '200':
+          description: The reading
+          headers: { $ref: '#/components/headers/CacheHeaders' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reading'
+        '304': { $ref: '#/components/responses/NotModified' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '406': { $ref: '#/components/responses/NotAcceptable' }
+    delete:
+      tags: [Readings]
+      summary: Delete a reading (administrative correction)
+      description: |
+        Requires `admin:write`. Readings are append-only, so PUT and PATCH on this URI return
+        `405` with `Allow: GET, DELETE`.
+      responses:
+        '204':
+          description: Deleted (empty body)
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token from `POST /tokens`. Sent as `Authorization: Bearer <token>`.
+
+  headers:
+    CacheHeaders:
+      ETag:
+        description: Strong validator (hash of the response body)
+        schema: { type: string, example: '"289af5a69c089f2e3a8c5d02703613acdc64b7a6"' }
+      Last-Modified:
+        description: Newest modification time of the data in the response
+        schema: { type: string, example: 'Sat, 10 Oct 2026 02:30:00 GMT' }
+
+  parameters:
+    ProvinceId:
+      name: provinceId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ObjectId' }
+    DistrictId:
+      name: districtId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ObjectId' }
+    SubstationId:
+      name: substationId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ObjectId' }
+    InstallationId:
+      name: installationId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ObjectId' }
+    ReadingId:
+      name: readingId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ObjectId' }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    From:
+      name: from
+      in: query
+      description: Start of time window (inclusive), ISO 8601
+      schema: { type: string, format: date-time }
+    To:
+      name: to
+      in: query
+      description: End of time window (inclusive), ISO 8601. Must not be earlier than `from`.
+      schema: { type: string, format: date-time }
+    Sort:
+      name: sort
+      in: query
+      description: '`timestamp` ascending, `-timestamp` descending'
+      schema: { type: string, enum: [timestamp, -timestamp], default: -timestamp }
+    FilterDistrict:
+      name: district
+      in: query
+      schema: { $ref: '#/components/schemas/ObjectId' }
+    FilterSubstation:
+      name: substation
+      in: query
+      schema: { $ref: '#/components/schemas/ObjectId' }
+    FilterInstallation:
+      name: installation
+      in: query
+      schema: { $ref: '#/components/schemas/ObjectId' }
+    FilterStatus:
+      name: status
+      in: query
+      schema: { type: string, enum: [active, inactive, maintenance] }
+    IfMatch:
+      name: If-Match
+      in: header
+      description: ETag from a previous GET. If it is stale the request fails with `412`.
+      schema: { type: string }
+
+  responses:
+    NotModified:
+      description: Not modified. The client's cached copy is current. Empty body.
+    ReadingsPage:
+      description: A page of readings
+      headers: { $ref: '#/components/headers/CacheHeaders' }
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReadingPage'
+    InstallationsPage:
+      description: A page of installations
+      headers: { $ref: '#/components/headers/CacheHeaders' }
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InstallationPage'
+    BadRequest:
+      description: Invalid id, query parameter, body or JSON (`VALIDATION_ERROR`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            code: VALIDATION_ERROR
+            message: Invalid query parameters
+            details: [{ field: limit, issue: '"limit" must be less than or equal to 100' }]
+    Unauthorized:
+      description: Missing, invalid or expired token (`UNAUTHENTICATED`). Includes `WWW-Authenticate`.
+      headers:
+        WWW-Authenticate:
+          schema: { type: string, example: Bearer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            code: UNAUTHENTICATED
+            message: A bearer token is required
+            details: [{ field: Authorization, issue: 'expected "Bearer <token>"' }]
+    Forbidden:
+      description: Valid token, but wrong scope or resource outside your jurisdiction (`FORBIDDEN`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            code: FORBIDDEN
+            message: This district is outside your jurisdiction
+            details: [{ field: districtId, issue: outside your jurisdiction }]
+    NotFound:
+      description: Resource or route does not exist (`RESOURCE_NOT_FOUND`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            code: RESOURCE_NOT_FOUND
+            message: Installation not found
+            details: [{ field: id, issue: no installation with id 000000000000000000000000 }]
+    MethodNotAllowed:
+      description: Method not supported on this resource (`METHOD_NOT_ALLOWED`). Includes `Allow`.
+      headers:
+        Allow:
+          schema: { type: string, example: 'GET, DELETE' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotAcceptable:
+      description: '`Accept` excludes `application/json` (`NOT_ACCEPTABLE`)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Duplicate value or delete blocked by existing data (`CONFLICT`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            code: CONFLICT
+            message: A reading for this installation and timestamp already exists
+            details: [{ field: timestamp, issue: duplicate reading for this installation }]
+    PreconditionFailed:
+      description: '`If-Match` does not match the current ETag (`PRECONDITION_FAILED`)'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PayloadTooLarge:
+      description: Body larger than 10 KB (`PAYLOAD_TOO_LARGE`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UnsupportedMediaType:
+      description: Write request without a JSON content type (`UNSUPPORTED_MEDIA_TYPE`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyRequests:
+      description: Rate limit exceeded (`RATE_LIMITED`). Includes `Retry-After`.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    ObjectId:
+      type: string
+      pattern: '^[0-9a-fA-F]{24}$'
+      example: 6ac9a3aabdd6d52bbe2f77e6
+
+    Error:
+      type: object
+      description: The single error body used by every non-2xx response
+      required: [code, message, details]
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - UNAUTHENTICATED
+            - FORBIDDEN
+            - RESOURCE_NOT_FOUND
+            - METHOD_NOT_ALLOWED
+            - NOT_ACCEPTABLE
+            - CONFLICT
+            - PRECONDITION_FAILED
+            - PAYLOAD_TOO_LARGE
+            - UNSUPPORTED_MEDIA_TYPE
+            - RATE_LIMITED
+            - INTERNAL_ERROR
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              issue: { type: string }
+
+    Links:
+      type: object
+      properties:
+        self: { type: string, format: uri }
+        next: { type: string, format: uri, nullable: true }
+        prev: { type: string, format: uri, nullable: true }
+
+    Province:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/ObjectId' }
+        name: { type: string, example: Western }
+        code: { type: string, example: WP }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProvinceCollection:
+      type: object
+      properties:
+        total: { type: integer }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Province' }
+
+    District:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/ObjectId' }
+        name: { type: string, example: Colombo }
+        provinceId: { $ref: '#/components/schemas/ObjectId' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DistrictCollection:
+      type: object
+      properties:
+        total: { type: integer }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/District' }
+
+    Substation:
+      type: object
+      properties:
+        id: { $ref: '#/components/schemas/ObjectId' }
+        name: { type: string, example: Colombo Grid Substation A }
+        capacityMva: { type: number, example: 63 }
+        districtId: { $ref: '#/components/schemas/ObjectId' }
+        provinceId: { $ref: '#/components/schemas/ObjectId' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SubstationCollection:
+      type: object
+      properties:
+        total: { type: integer }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Substation' }
+
+    Location:
+      type: object
+      properties:
+        latitude: { type: number, minimum: -90, maximum: 90, example: 6.9271 }
+        longitude: { type: number, minimum: -180, maximum: 180, example: 79.8612 }
+        address: { type: string, maxLength: 200 }
+
+    Installation:
+      type: object
+      description: A rooftop solar site. `meterId` is an attribute (there is no separate Device entity).
+      properties:
+        id: { $ref: '#/components/schemas/ObjectId' }
+        name: { type: string, example: Perera Residence Rooftop }
+        meterId: { type: string, example: SLSEA-M-00001 }
+        capacityKw: { type: number, example: 5 }
+        installDate: { type: string, format: date-time }
+        status: { type: string, enum: [active, inactive, maintenance] }
+        location: { $ref: '#/components/schemas/Location' }
+        substationId: { $ref: '#/components/schemas/ObjectId' }
+        districtId: { $ref: '#/components/schemas/ObjectId' }
+        provinceId: { $ref: '#/components/schemas/ObjectId' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    InstallationPage:
+      type: object
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Installation' }
+        links: { $ref: '#/components/schemas/Links' }
+    InstallationCreate:
+      type: object
+      required: [name, meterId, capacityKw, installDate, substationId]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 2, maxLength: 100, example: Test Rooftop }
+        meterId: { type: string, pattern: '^[A-Za-z0-9-]{3,40}$', example: SLSEA-M-99001 }
+        capacityKw: { type: number, minimum: 0.1, maximum: 10000, example: 5 }
+        installDate: { type: string, format: date, example: '2026-01-15' }
+        status: { type: string, enum: [active, inactive, maintenance] }
+        location: { $ref: '#/components/schemas/Location' }
+        substationId: { $ref: '#/components/schemas/ObjectId' }
+    InstallationCreated:
+      allOf:
+        - $ref: '#/components/schemas/Installation'
+        - type: object
+          properties:
+            deviceSecret:
+              type: string
+              description: Shown once. Only its bcrypt hash is stored.
+    InstallationReplace:
+      type: object
+      required: [name, meterId, capacityKw, installDate, status, location]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 2, maxLength: 100 }
+        meterId: { type: string, pattern: '^[A-Za-z0-9-]{3,40}$' }
+        capacityKw: { type: number, minimum: 0.1, maximum: 10000 }
+        installDate: { type: string, format: date }
+        status: { type: string, enum: [active, inactive, maintenance] }
+        location: { $ref: '#/components/schemas/Location' }
+    InstallationPatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 2, maxLength: 100 }
+        meterId: { type: string, pattern: '^[A-Za-z0-9-]{3,40}$' }
+        capacityKw: { type: number, minimum: 0.1, maximum: 10000 }
+        installDate: { type: string, format: date }
+        status: { type: string, enum: [active, inactive, maintenance] }
+        location: { $ref: '#/components/schemas/Location' }
+    InstallationDetail:
+      allOf:
+        - $ref: '#/components/schemas/Installation'
+        - type: object
+          properties:
+            substation: { $ref: '#/components/schemas/Substation' }
+            district: { $ref: '#/components/schemas/District' }
+            province:
+              allOf:
+                - $ref: '#/components/schemas/Province'
+              nullable: true
+            lastReading:
+              allOf:
+                - $ref: '#/components/schemas/Reading'
+              nullable: true
+
+    Reading:
+      type: object
+      description: One timestamped generation record. The series is append-only.
+      properties:
+        id: { $ref: '#/components/schemas/ObjectId' }
+        installationId: { $ref: '#/components/schemas/ObjectId' }
+        timestamp: { type: string, format: date-time, example: '2026-10-10T02:30:00.000Z' }
+        powerKw: { type: number, description: Instantaneous power, example: 4.2 }
+        energyKwh: { type: number, description: Cumulative meter counter, example: 17100.5 }
+        voltage: { type: number, example: 231.4 }
+    ReadingInput:
+      type: object
+      required: [timestamp, powerKw, energyKwh, voltage]
+      additionalProperties: false
+      properties:
+        timestamp: { type: string, format: date-time, example: '2026-10-10T03:00:00.000Z' }
+        powerKw: { type: number, minimum: 0, maximum: 1000, example: 4.2 }
+        energyKwh: { type: number, minimum: 0, example: 17100.5 }
+        voltage: { type: number, minimum: 0, maximum: 1000, example: 231.4 }
+    ReadingPage:
+      type: object
+      properties:
+        total: { type: integer, example: 672 }
+        page: { type: integer }
+        limit: { type: integer }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Reading' }
+        links: { $ref: '#/components/schemas/Links' }
+
+    GenerationSummary:
+      type: object
+      properties:
+        districtId: { $ref: '#/components/schemas/ObjectId' }
+        districtName: { type: string, example: Colombo }
+        asOf:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of the newest reading in the district
+        day:
+          type: object
+          nullable: true
+          properties:
+            date: { type: string, example: '2026-10-10' }
+            timezone: { type: string, example: Asia/Colombo }
+            from: { type: string, format: date-time }
+            to: { type: string, format: date-time }
+        currentPowerKw: { type: number, description: Sum of each installation's latest reading }
+        todayEnergyKwh: { type: number, description: Sum of per-installation (max - min) of the energy counter today }
+        installations:
+          type: object
+          properties:
+            total: { type: integer }
+            reporting: { type: integer, description: Installations with at least one reading }
+        installedCapacityKw: { type: number }
+
+    TokenRequest:
+      oneOf:
+        - type: object
+          title: User credentials
+          required: [email, password]
+          additionalProperties: false
+          properties:
+            email: { type: string, format: email }
+            password: { type: string, format: password }
+        - type: object
+          title: Device credentials
+          required: [meterId, deviceSecret]
+          additionalProperties: false
+          properties:
+            meterId: { type: string, example: SLSEA-M-00001 }
+            deviceSecret: { type: string, format: password }
+    TokenResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        expires_in: { type: integer, example: 3600 }
+        scope: { type: string, example: analyst:read }
+        jurisdiction:
+          type: object
+          description: Present for SLSEA users only
+          properties:
+            level: { type: string, enum: [national, province, district] }
+            id: { $ref: '#/components/schemas/ObjectId' }
