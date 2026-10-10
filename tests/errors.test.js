@@ -21,6 +21,21 @@ function expectErrorContract(res, status, code) {
 
 const ZERO_ID = '000000000000000000000000';
 
+require('dotenv').config();
+const request = require('supertest');
+const mongoose = require('mongoose');
+const app = require('../src/app');
+const { adminToken } = require('./helpers');
+
+let agent;
+beforeAll(async () => {
+  await mongoose.connect(process.env.MONGO_URI);
+  agent = request.agent(app).set('Authorization', `Bearer ${await adminToken()}`);
+});
+afterAll(async () => {
+  await mongoose.disconnect();
+});
+
 describe('error contract', () => {
   test('400 malformed id', async () => {
     expectErrorContract(await request(app).get('/installations/abc'), 400, 'VALIDATION_ERROR');
