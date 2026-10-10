@@ -15,12 +15,10 @@ const readingSchema = new mongoose.Schema(
   { timestamps: { createdAt: true, updatedAt: false } } // append-only: no updatedAt
 );
 
-// Main query: one installation's history, newest first
 readingSchema.index({ installationId: 1, timestamp: -1 });
-// Jurisdiction queries and the district summary
-readingSchema.index({ districtId: 1, timestamp: -1 });
-readingSchema.index({ provinceId: 1, timestamp: -1 });
-// Prevent duplicate readings for the same installation and timestamp
+readingSchema.index({ substationId: 1, timestamp: -1, _id: -1 });
+readingSchema.index({ districtId: 1, timestamp: -1, _id: -1 });
+readingSchema.index({ provinceId: 1, timestamp: -1, _id: -1 });
 readingSchema.index({ installationId: 1, timestamp: 1 }, { unique: true });
 
 module.exports = mongoose.model('GenerationReading', readingSchema);
