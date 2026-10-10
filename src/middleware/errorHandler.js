@@ -5,11 +5,16 @@ function notFoundHandler(req, res, next) {
 }
 
 function errorHandler(err, req, res, next) {
-  // malformed JSON body
   if (err.type === 'entity.parse.failed') {
     err = ApiError.badRequest('Malformed JSON body');
   }
+  if (err.code === 11000) {
+    const fields = Object.keys(err.keyPattern || {});
+    err = ApiError.conflict('A resource with these unique values already exists',
+      fields.map((f) => ({ field: f, issue: 'must be unique' })));
+  }
   if (err instanceof ApiError) {
+    if (err.headers) res.set(err.headers);
     return res.status(err.status).json({ code: err.code, message: err.message, details: err.details });
   }
   console.error(err);
