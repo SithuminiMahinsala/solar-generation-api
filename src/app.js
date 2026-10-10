@@ -2,6 +2,7 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
+const requireJson = require('./middleware/requireJson');
 
 const app = express();
 
@@ -12,6 +13,7 @@ app.use(express.json());
 
 app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
+app.use(['/provinces', '/districts', '/substations', '/installations'], requireJson);
 app.use('/provinces', require('./routes/provinces.routes'));
 app.use('/districts', require('./routes/districts.routes'));
 app.use('/substations', require('./routes/substations.routes'));
