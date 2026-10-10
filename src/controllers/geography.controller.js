@@ -3,11 +3,12 @@ const asyncHandler = require('../utils/asyncHandler');
 const { findOr404 } = require('../utils/ids');
 const { serialize } = require('../utils/serialize');
 const { sendJson, maxDate } = require('../utils/conditional');
+const { scopeFilter } = require('../middleware/jurisdiction');
 
 const collection = (data) => ({ total: data.length, data: serialize(data) });
 
 exports.listProvinces = asyncHandler(async (req, res) => {
-  const provinces = await Province.find().sort({ name: 1 }).lean();
+  const provinces = await Province.find(scopeFilter(req.auth, Province)).sort({ name: 1 }).lean();
   sendJson(req, res, collection(provinces), maxDate(provinces.map((p) => p.updatedAt)));
 });
 

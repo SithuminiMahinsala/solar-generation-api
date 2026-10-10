@@ -1,12 +1,18 @@
 const router = require('express').Router();
 const c = require('../controllers/geography.controller');
 const r = require('../controllers/readings.controller');
+const { District } = require('../models');
 const { validateId } = require('../utils/ids');
+const { requireScope } = require('../middleware/auth');
+const { guard } = require('../middleware/jurisdiction');
 
 router.param('districtId', validateId);
 
-router.get('/:districtId', c.getDistrict);
-router.get('/:districtId/substations', c.listSubstationsInDistrict);
-router.get('/:districtId/readings', r.listDistrictReadings);
+const read = requireScope('analyst:read');
+const own = guard(District, 'districtId', 'District');
+
+router.get('/:districtId', read, own, c.getDistrict);
+router.get('/:districtId/substations', read, own, c.listSubstationsInDistrict);
+router.get('/:districtId/readings', read, own, r.listDistrictReadings);
 
 module.exports = router;

@@ -5,6 +5,7 @@ const { OBJECT_ID, findOr404 } = require('../utils/ids');
 const { serialize, serializeReading } = require('../utils/serialize');
 const { Joi, paginationKeys, validateQuery, buildPage } = require('../utils/pagination');
 const { sendJson, maxDate } = require('../utils/conditional');
+const { scopeFilter } = require('../middleware/jurisdiction');
 
 const objectId = Joi.string().pattern(OBJECT_ID).messages({
   'string.pattern.base': 'must be a 24-character hexadecimal id',
@@ -15,20 +16,25 @@ const listSchema = Joi.object({
   province: objectId,
   district: objectId,
   substation: objectId,
+  meterId: Joi.string().trim().max(40),
   status: Joi.string().valid('active', 'inactive', 'maintenance'),
-})
+});
 
 async function pagedInstallations(req, res, baseFilter = {}) {
   const q = validateQuery(listSchema, req.query);
-  const filter = { ...baseFilter };
-  if (q.province) filter.provinceId = q.province;
-  if (q.district) filter.districtId = q.district;
-  if (q.substation) filter.substationId = q.substation;
-  if (q.status) filter.status = q.status;
+  const query = {};
+  if (q.province) query.provinceId = q.province;
+  if (q.district) query.districtId = q.district;
+  if (q.substation) query.substationId = q.substation;
+  if (q.meterId) query.meterId = q.meterId;
+  if (q.status) query.status = q.status;
+
+  // $and: the caller's jurisdiction can never be widened by a query parameter
+  const filter = { $and: [scopeFilter(req.auth, Installation), baseFilter, query] };
 
   const [items, total] = await Promise.all([
     Installation.find(filter)
-      .sort({ name: 1, _id: 1 }) // _id tie-breaker keeps pages stable
+      .sort({ name: 1, _id: 1 })
       .skip((q.page - 1) * q.limit)
       .limit(q.limit)
       .lean(),
@@ -58,7 +64,6 @@ exports.getInstallation = asyncHandler(async (req, res) => {
 const latestReading = (installationId) =>
   Reading.findOne({ installationId }).sort({ timestamp: -1 }).lean();
 
-// Composite resource: installation plus its most relevant related data
 exports.getInstallationDetail = asyncHandler(async (req, res) => {
   const inst = await findOr404(Installation, req.params.installationId, 'Installation');
   const [substation, district, province, reading] = await Promise.all([
@@ -68,6 +73,9 @@ exports.getInstallationDetail = asyncHandler(async (req, res) => {
     latestReading(inst._id),
   ]);
 
+  // A district user is outside the province's own scope, so it is not embedded
+  const showProvince = req.auth.level !== 'district';
+
   sendJson(
     req,
     res,
@@ -75,20 +83,19 @@ exports.getInstallationDetail = asyncHandler(async (req, res) => {
       ...serialize(inst),
       substation: serialize(substation),
       district: serialize(district),
-      province: serialize(province),
+      province: showProvince ? serialize(province) : null,
       lastReading: serializeReading(reading),
     },
     maxDate([
       inst.updatedAt,
       substation?.updatedAt,
       district?.updatedAt,
-      province?.updatedAt,
+      showProvince ? province?.updatedAt : null,
       reading?.createdAt,
     ])
   );
 });
 
-// Derived resource: the single most recent reading
 exports.getLastReading = asyncHandler(async (req, res) => {
   const inst = await findOr404(Installation, req.params.installationId, 'Installation');
   const reading = await latestReading(inst._id);
