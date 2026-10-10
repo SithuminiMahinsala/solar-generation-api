@@ -1,16 +1,4 @@
-require('dotenv').config();
-const request = require('supertest');
-const mongoose = require('mongoose');
-const app = require('../src/app');
-
-beforeAll(async () => {
-  await mongoose.connect(process.env.MONGO_URI);
-});
-afterAll(async () => {
-  await mongoose.disconnect();
-});
-
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const request = require('supertest');
 const mongoose = require('mongoose');
 const app = require('../src/app');
@@ -150,13 +138,19 @@ describe('installations and readings', () => {
     expect(res.status).toBe(400);
   });
 
-  test('readings: conditional GET returns 304', async () => {
-    const url = `/installations/${installationId}/readings`;
-    const first = await agent.get(url);
-    const second = await agent.get(url).set('If-None-Match', first.headers.etag);
-    expect(second.status).toBe(304);
-    expect(second.text).toBe('');
-  });
+test('readings: conditional GET returns 304', async () => {
+  const url = `/installations/${installationId}/readings`;
+  // Pin Host: supertest uses a random port per request, and links in the body contain the host
+  const first = await agent.get(url).set('Host', 'api.test');
+  expect(first.headers.etag).toBeDefined();
+
+  const second = await agent
+    .get(url)
+    .set('Host', 'api.test')
+    .set('If-None-Match', first.headers.etag);
+  expect(second.status).toBe(304);
+  expect(second.text).toBe('');
+});
 
   test('district readings are scoped to that district', async () => {
     const inst = await agent.get(`/installations/${installationId}`);
@@ -165,4 +159,5 @@ describe('installations and readings', () => {
     expect(res.status).toBe(200);
     expect(res.body.total).toBeGreaterThan(0);
   });
+
 });
