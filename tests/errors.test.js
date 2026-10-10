@@ -28,15 +28,15 @@ const ZERO_ID = '000000000000000000000000';
 
 describe('error contract', () => {
   test('400 malformed id', async () => {
-    expectErrorContract(await request(app).get('/installations/abc'), 400, 'VALIDATION_ERROR');
+    expectErrorContract(await agent.get('/installations/abc'), 400, 'VALIDATION_ERROR');
   });
 
   test('400 unknown query parameter', async () => {
-    expectErrorContract(await request(app).get('/installations?distrct=x'), 400, 'VALIDATION_ERROR');
+    expectErrorContract(await agent.get('/installations?distrct=x'), 400, 'VALIDATION_ERROR');
   });
 
   test('400 malformed JSON', async () => {
-    const res = await request(app)
+    const res = await agent
       .post('/installations')
       .set('Content-Type', 'application/json')
       .send('{"name":');
@@ -44,31 +44,31 @@ describe('error contract', () => {
   });
 
   test('404 unknown resource', async () => {
-    expectErrorContract(await request(app).get(`/installations/${ZERO_ID}`), 404, 'RESOURCE_NOT_FOUND');
+    expectErrorContract(await agent.get(`/installations/${ZERO_ID}`), 404, 'RESOURCE_NOT_FOUND');
   });
 
   test('404 unknown route', async () => {
-    expectErrorContract(await request(app).get('/nonsense'), 404, 'RESOURCE_NOT_FOUND');
+    expectErrorContract(await agent.get('/nonsense'), 404, 'RESOURCE_NOT_FOUND');
   });
 
   test('405 with Allow header', async () => {
-    const res = await request(app).delete('/provinces');
+    const res = await agent.delete('/provinces');
     expectErrorContract(res, 405, 'METHOD_NOT_ALLOWED');
     expect(res.headers.allow).toBe('GET');
   });
 
   test('406 when Accept excludes JSON', async () => {
-    const res = await request(app).get('/provinces').set('Accept', 'text/html');
+    const res = await agent.get('/provinces').set('Accept', 'text/html');
     expectErrorContract(res, 406, 'NOT_ACCEPTABLE');
   });
 
   test('413 oversized body', async () => {
-    const res = await request(app).post('/installations').send({ pad: 'x'.repeat(20000) });
+    const res = await agent.post('/installations').send({ pad: 'x'.repeat(20000) });
     expectErrorContract(res, 413, 'PAYLOAD_TOO_LARGE');
   });
 
   test('415 wrong content type', async () => {
-    const res = await request(app)
+    const res = await agent
       .post('/installations')
       .set('Content-Type', 'text/plain')
       .send('hello');
@@ -76,9 +76,9 @@ describe('error contract', () => {
   });
 
   test('412 stale If-Match', async () => {
-    const list = await request(app).get('/installations?limit=1');
+    const list = await agent.get('/installations?limit=1');
     const id = list.body.data[0].id;
-    const res = await request(app)
+    const res = await agent
       .patch(`/installations/${id}`)
       .set('If-Match', '"stale"')
       .send({ status: 'active' });
