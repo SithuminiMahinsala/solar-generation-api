@@ -10,6 +10,10 @@
     "verify": "node src/seed/verify.js",
     "test": "jest --runInBand --forceExit"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  
   "jest": {
     "testEnvironment": "node",
     "testTimeout": 20000
@@ -29,6 +33,7 @@
     "mongoose": "^9.11.1",
     "swagger-ui-express": "^5.0.1",
     "yamljs": "^0.3.0"
+    
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "^13.1.0",
