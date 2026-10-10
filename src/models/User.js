@@ -18,7 +18,6 @@ userSchema.pre('validate', function (next) {
   if (this.jurisdictionLevel !== 'national' && !this.jurisdictionId) {
     return next(new Error('jurisdictionId is required for province and district users'));
   }
-  next();
 });
 
 module.exports = mongoose.model('User', userSchema);
