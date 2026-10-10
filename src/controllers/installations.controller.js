@@ -16,7 +16,7 @@ const listSchema = Joi.object({
   district: objectId,
   substation: objectId,
   status: Joi.string().valid('active', 'inactive', 'maintenance'),
-}).unknown(true);
+})
 
 async function pagedInstallations(req, res, baseFilter = {}) {
   const q = validateQuery(listSchema, req.query);
