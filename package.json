@@ -8,7 +8,8 @@
     "dev": "nodemon src/server.js",
     "seed": "node src/seed/seed.js",
     "verify": "node src/seed/verify.js",
-    "test": "jest --runInBand --forceExit"
+    "test": "jest --runInBand --forceExit",
+    "smoke": "node scripts/smoke.js"
   },
   "engines": {
     "node": ">=20"
