@@ -4,6 +4,7 @@ const ApiError = require('../utils/ApiError');
 const { OBJECT_ID, findOr404 } = require('../utils/ids');
 const { serialize, serializeReading } = require('../utils/serialize');
 const { Joi, paginationKeys, validateQuery, buildPage } = require('../utils/pagination');
+const { sendJson, maxDate } = require('../utils/conditional');
 
 const objectId = Joi.string().pattern(OBJECT_ID).messages({
   'string.pattern.base': 'must be a 24-character hexadecimal id',
@@ -33,7 +34,13 @@ async function pagedInstallations(req, res, baseFilter = {}) {
       .lean(),
     Installation.countDocuments(filter),
   ]);
-  res.json(buildPage(req, q.page, q.limit, total, serialize(items)));
+
+  sendJson(
+    req,
+    res,
+    buildPage(req, q.page, q.limit, total, serialize(items)),
+    maxDate(items.map((i) => i.updatedAt))
+  );
 }
 
 exports.listInstallations = asyncHandler((req, res) => pagedInstallations(req, res));
@@ -45,7 +52,7 @@ exports.listInstallationsInSubstation = asyncHandler(async (req, res) => {
 
 exports.getInstallation = asyncHandler(async (req, res) => {
   const inst = await findOr404(Installation, req.params.installationId, 'Installation');
-  res.json(serialize(inst));
+  sendJson(req, res, serialize(inst), inst.updatedAt);
 });
 
 const latestReading = (installationId) =>
@@ -60,13 +67,25 @@ exports.getInstallationDetail = asyncHandler(async (req, res) => {
     Province.findById(inst.provinceId).lean(),
     latestReading(inst._id),
   ]);
-  res.json({
-    ...serialize(inst),
-    substation: serialize(substation),
-    district: serialize(district),
-    province: serialize(province),
-    lastReading: serializeReading(reading),
-  });
+
+  sendJson(
+    req,
+    res,
+    {
+      ...serialize(inst),
+      substation: serialize(substation),
+      district: serialize(district),
+      province: serialize(province),
+      lastReading: serializeReading(reading),
+    },
+    maxDate([
+      inst.updatedAt,
+      substation?.updatedAt,
+      district?.updatedAt,
+      province?.updatedAt,
+      reading?.createdAt,
+    ])
+  );
 });
 
 // Derived resource: the single most recent reading
@@ -78,5 +97,5 @@ exports.getLastReading = asyncHandler(async (req, res) => {
       { field: 'installationId', issue: 'installation has no readings yet' },
     ]);
   }
-  res.json(serializeReading(reading));
+  sendJson(req, res, serializeReading(reading), reading.createdAt);
 });
