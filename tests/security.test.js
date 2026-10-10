@@ -135,6 +135,14 @@ describe('district analyst: jurisdiction scope', () => {
     expect((await colombo.post('/installations').send({})).status).toBe(403);
     expect((await colombo.delete(`/installations/${own.id}`)).status).toBe(403);
   });
+
+    test('summary: own district OK, another district 403', async () => {
+    const own = await colombo.get(`/districts/${colomboId}/generation-summary`);
+    expect(own.status).toBe(200);
+    const other = await colombo.get(`/districts/${gampahaId}/generation-summary`);
+    expect(other.status).toBe(403);
+    expect(other.body.code).toBe('FORBIDDEN');
+  });
 });
 
 describe('province analyst', () => {

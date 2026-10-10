@@ -1,6 +1,8 @@
 // [pattern, allowed methods]. Keep in sync with the routers.
-const id = [/^\/tokens\/?$/, ['POST']];
+const id = '[^/]+';
 module.exports = [
+  [/^\/tokens\/?$/, ['POST']],
+
   [/^\/provinces\/?$/, ['GET']],
   [new RegExp(`^/provinces/${id}/?$`), ['GET']],
   [new RegExp(`^/provinces/${id}/districts/?$`), ['GET']],
@@ -9,6 +11,7 @@ module.exports = [
   [new RegExp(`^/districts/${id}/?$`), ['GET']],
   [new RegExp(`^/districts/${id}/substations/?$`), ['GET']],
   [new RegExp(`^/districts/${id}/readings/?$`), ['GET']],
+  [new RegExp(`^/districts/${id}/generation-summary/?$`), ['GET']],
 
   [new RegExp(`^/substations/${id}/?$`), ['GET']],
   [new RegExp(`^/substations/${id}/installations/?$`), ['GET']],
